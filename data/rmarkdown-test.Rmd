@@ -1,0 +1,41 @@
+---
+title: "Untitled"
+author: "Geoff Willard"
+date: "2/18/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Header One
+
+Here is some explanation about my work. **Bold text here**
+
+A bulleted list needs to have a blank line above it to be treated as a list in Markdown
+
+* apple 
+* pear
+* avocado
+
+here is another paragraph
+
+$\sum{x^2}$
+
+```{r name_1}
+# hash here denotes a comment
+x <- c(1, 20, -7)
+x
+```
+
+here is a hidden chunk, we're not showing the code used to generate this result of y
+
+```{r, echo = FALSE}
+y <- x + 4
+y
+```
+
+```{r}
+bg_chem <-read.csv(file = "data/BGchem2008data.csv")
+```
+
