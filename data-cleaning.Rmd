@@ -1,0 +1,138 @@
+---
+title: "Data Cleaning"
+author: "Geoff Willard"
+date: "2/19/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, warning = FALSE, message = FALSE}
+library(dplyr)
+library(tidyr)
+```
+
+package::function()
+stats::filter()
+
+# Read in data
+We are using data from 
+[Mike Byerly. Alaska commercial salmon catches by management region (1886- 1997). Gulf of Alaska Data Portal. df35b.304.2.](https://knb.ecoinformatics.org/view/df35b.304.2)
+
+```{r}
+catch_original <- read.csv(url("https://knb.ecoinformatics.org/knb/d1/mn/v2/object/df35b.302.1", method = "libcurl"), stringsAsFactors = F)
+
+head(catch_original)
+```
+
+
+# Clean and reshape
+Remove marginal sum and notes columns using 'select()'
+
+```{r}
+catch_clean <- catch_original %>% 
+  select(Region, Year, Chinook, Sockeye, Coho, Pink, Chum) %>% 
+  mutate(Chinook = ifelse(Chinook == "I", 1, Chinook)) %>% 
+  mutate(Chinook = as.numeric(Chinook))
+
+head(catch_clean)
+```
+
+##QA: Quality Assurance
+Find where as.numeric couldn't convert Chinook to a number
+
+```{r}
+i <- which(is.na(catch_clean$Chinook))
+i
+```
+
+```{r}
+catch_original[i, ]
+```
+
+Reshape from wide to tall format using 'pivot_longer'
+
+```{r}
+catch_long <- catch_clean %>% 
+  pivot_longer(cols = -c(Region, Year),
+               names_to = "species",
+               values_to = "catch") %>% 
+  rename(catch_thousands = catch) %>% 
+  mutate(catch = catch_thousands * 1000) %>% 
+  select(-catch_thousands)
+
+head(catch_long)
+```
+
+Example with pivot wider
+
+```{r}
+catch_wide <- catch_long %>% 
+  pivot_wider(names_from = Year, 
+              values_from = catch)
+
+head(catch_wide)
+```
+
+
+##group_by and summarize
+
+```{r}
+mean_region <- catch_long %>% 
+  group_by(Region, species) %>% 
+  summarise(catch_mean = mean(catch),
+            num_obs = n())
+
+head(mean_region)
+```
+
+```{r}
+mean_species <- catch_long %>% 
+  group_by(species) %>% 
+  summarise(mean_catch = mean(catch),
+            num_obs = n())
+
+head(mean_species)
+```
+
+What year was the total salmon catch the highest?
+```{r}
+annual_catch <- catch_long %>% 
+  group_by(Year) %>% 
+  summarize(total_catch = sum(catch)) %>% 
+  arrange(-total_catch)
+
+annual_catch
+```
+
+
+What year had the highest SOCKEYE catch?
+```{r}
+annual_sockeye <- catch_long %>% 
+  filter(species == "Sockeye") %>% 
+  group_by(Year) %>% 
+  summarize(total_catch = sum(catch)) %>% 
+  arrange(-total_catch)
+
+head(annual_sockeye)
+```
+
+
+# Join to regions table
+
+Read in regions data
+```{r}
+region_defs <- read.csv("https://knb.ecoinformatics.org/knb/d1/mn/v2/object/df35b.303.1", stringsAsFactors = FALSE) %>% 
+  select(code, mgmtArea)
+
+head(region_defs)
+```
+
+```{r}
+catch_joined <- left_join(catch_long, region_defs, by = c("Region" = "code"))
+
+head(catch_joined)
+```
+
