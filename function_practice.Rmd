@@ -1,0 +1,57 @@
+---
+title: "Functions"
+author: "Geoff Willard"
+date: "2/20/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Write a function that computes the percentage of a number
+```{r}
+compute_percent <- function(input_percent,input_number) {
+    output = input_number * input_percent/100
+    output
+}
+
+compute_percent(20,92)
+```
+
+Make the ratio factor an argument so we can also use it to compute 1/1000
+```{r}
+compute_ratio <- function(input_percent,input_number,input_denominator) {
+    output = input_number * input_percent/input_denominator
+    output
+}
+
+compute_ratio(20,92,1000)
+```
+
+On the same script write a second function to compute a2-b2
+```{r}
+compute_ratio <- function(input_percent,input_number,input_denominator) {
+    output = input_number * input_percent/input_denominator
+    output
+}
+compute_square <-function(inputa, inputb) {
+    output = inputa^2 - inputb^2
+    output
+}
+compute_square(5,4)
+```
+
+Modify the function to compute the square root of a2-b2
+```{r}
+compute_root <-function(inputa,inputb) {
+    output = sqrt(inputa^2 - inputb^2)
+    output
+}
+compute_root(5,4)
+```
+
+Find potential values that could make the function to crash and add necessary error handling
+```{r}
+
+```
