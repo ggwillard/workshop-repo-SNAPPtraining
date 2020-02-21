@@ -1,0 +1,332 @@
+---
+title: "Alaskan_Maps"
+author: "Geoff Willard"
+date: "2/21/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(ggmap)
+library(leaflet)
+```
+
+#Read in data
+
+```{r}
+ak_regions <-read_sf("sp_data/ak_regions_simp.shp")
+
+```
+
+```{r}
+ak_regions_3338 <- ak_regions %>% 
+  st_transform(crs=3338)
+
+plot(ak_regions_3338)
+```
+
+```{r}
+ak_regions_3338 %>% 
+  filter(region == "Southeast") %>% 
+  select(region)
+```
+
+#Spatial joins and summaries
+```{r}
+pop <- read.csv("sp_data/alaska_population.csv", stringsAsFactors = F)
+
+pop_4326 <- st_as_sf(pop,
+                     coords = c('lng', 'lat'),
+                     crs = 4326,
+                     remove = F)
+
+pop_3338 <- pop_4326 %>% 
+  st_transform(crs = 3338)
+```
+
+```{r}
+pop_joined <- st_join(pop_3338, ak_regions_3338, join = st_within)
+
+plot(pop_joined)
+```
+
+##Calculate population by region
+
+```{r}
+pop_region <- pop_joined %>% 
+  as.data.frame() %>% 
+  group_by(region) %>% 
+  summarise(total_pop = sum(population))
+
+head(pop_region)
+```
+
+```{r}
+pop_region_3338 <- left_join(ak_regions_3338, pop_region, by = "region")
+
+plot(pop_region_3338)
+```
+
+```{r}
+pop_mgmt_3338 <- pop_region_3338 %>% 
+  group_by(mgmt_area) %>% 
+  summarise(total_pop = sum(total_pop), do_union = F)
+
+plot(pop_mgmt_3338["total_pop"])
+```
+
+```{r}
+write_sf(pop_region_3338, "sp_data/ak_regions_pop.shp", delete_layer = TRUE)
+```
+
+#Make maps!
+
+```{r}
+rivers_3338 <- read_sf("sp_data/ak_rivers_simp.shp")
+st_crs(rivers_3338)
+```
+
+
+```{r}
+ggplot() +
+  geom_sf(data = pop_region_3338, aes(fill = total_pop)) +
+  geom_sf(data = rivers_3338, aes(size = StrOrder), color = "black") +
+  geom_sf(data = pop_3338, aes(), size = 0.5) +
+  scale_size(range = c(0.01, 0.2), guide = F) +
+  theme_bw() +
+  labs(fill = "Total Population") +
+  scale_fill_continuous(low = "khaki", high = "firebrick", labels = comma)
+
+```
+
+#Getting basemaps using ggmap
+
+```{r}
+pop_3857 <- pop_3338 %>% 
+  st_transform(crs = 3857)
+```
+
+```{r}
+# Define a function to fix the bbox to be in EPSG:3857
+# See https://github.com/dkahle/ggmap/issues/160#issuecomment-397055208
+ggmap_bbox_to_3857 <- function(map) {
+  if (!inherits(map, "ggmap")) stop("map must be a ggmap object")
+  # Extract the bounding box (in lat/lon) from the ggmap to a numeric vector, 
+  # and set the names to what sf::st_bbox expects:
+  map_bbox <- setNames(unlist(attr(map, "bb")), 
+                       c("ymin", "xmin", "ymax", "xmax"))
+  
+  # Coonvert the bbox to an sf polygon, transform it to 3857, 
+  # and convert back to a bbox (convoluted, but it works)
+  bbox_3857 <- st_bbox(st_transform(st_as_sfc(st_bbox(map_bbox, crs = 4326)), 3857))
+  
+  # Overwrite the bbox of the ggmap object with the transformed coordinates 
+  attr(map, "bb")$ll.lat <- bbox_3857["ymin"]
+  attr(map, "bb")$ll.lon <- bbox_3857["xmin"]
+  attr(map, "bb")$ur.lat <- bbox_3857["ymax"]
+  attr(map, "bb")$ur.lon <- bbox_3857["xmax"]
+  map
+}
+```
+
+```{r}
+bbox <- c(-170, 52, -130, 64)
+ak_map <- get_stamenmap(bbox, zoom = 4)
+ak_map_3857 <- ggmap_bbox_to_3857(ak_map)
+
+class(ak_map_3857)
+```
+
+```{r}
+ggmap(ak_map_3857) +
+  geom_sf(data = pop_3857, aes(color = population), inherit.aes = F) +
+  scale_color_continuous(low = "khaki", high = "firebrick", labels = comma)
+
+```
+
+## Interactive maps using Leaflet
+
+```{r}
+#define leaflet projection
+
+epsg3338 <- leaflet::leafletCRS(
+  crsClass = "L.Proj.CRS",
+  code = "EPSG:3338",
+  proj4def =  "+proj=aea +lat_1=55 +lat_2=65 +lat_0=50 +lon_0=-154 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+  resolutions = 2^(16:7))
+```
+
+```{r}
+pop_region_4326 <- pop_region_3338 %>% 
+  st_transform(crs = 4326)
+```
+
+```{r}
+pal <- colorNumeric(palette = "Reds", domain = pop_region_4326$total_pop)
+
+m <- leaflet(options = leafletOptions(crs = epsg3338)) %>%
+        addPolygons(data = pop_region_4326, 
+                    fillColor = ~pal(total_pop),
+                    weight = 1,
+                    color = "black",
+                    fillOpacity = 1,
+                    label = ~region) %>% 
+        addLegend(position = "bottomleft",
+                  pal = pal,
+                  values = range(pop_region_4326$total_pop),
+                  title = "Total Population")
+
+m
+```
+
+#Raster
+
+```{r}
+library(raster)
+
+lc_3338 <- raster("/home/shares/scientist/ds-workshop/ak_nlcd_2011_landcover_50m_3338.tif")
+
+lc_3338
+```
+
+```{r}
+plot(lc_3338)
+plot(pop_3338, add = TRUE)
+```
+
+#Extracting most frequent land cover
+
+```{r}
+raster_points <- extract(lc_3338, pop_3338, buffer = 500, fun=modal)
+raster_points
+```
+
+```{r}
+pop_joined$land_cover <- raster_points
+```
+
+Loading legend
+```{r}
+Legend_lc <- read.csv("/home/shares/scientist/ds-workshop/legend_ak_nlcd_2011.csv", stringsAsFactors = F)
+
+head(Legend_lc)
+```
+
+Recategorize
+```{r}
+# It is a lot of categories, let us consolidate this
+Legend_lc <- Legend_lc %>%
+  mutate(main_lc = ifelse(ID %in% 40:49, "Forest",
+                              ifelse(ID %in% 20:29, "Urban",
+                                     ifelse(ID %in% 50:59, "Shrub",
+                                             ifelse(ID %in% 70:79, "Grass",
+                                                     ifelse(ID %in% 80:89, "Crops",
+                                                             ifelse(ID %in% 90:99, "Wetland", Land.Cover.Type)
+                                                             )
+                                                     )
+                                             )
+                                     )
+                              )
+  )
+
+
+# Join the LC categories to the population data
+pop_3338_cover <- left_join(pop_joined, Legend_lc, by=c("land_cover"="ID")) %>% 
+  dplyr::select(-Red, -Green, -Blue, -Land.Cover.Type)
+```
+
+```{r}
+# Create color palette by keeping last color of each group
+pal <- Legend_lc %>% 
+  group_by(main_lc) %>% 
+  slice(n()) %>% # Keeping the last color of the groups
+  ungroup %>% 
+  arrange(ID) %>%
+  mutate(color_hex = rgb(Red, Green, Blue, max = 255)) %>% 
+  dplyr::select(main_lc, color_hex)
+
+# turn pallete into a list for plotting
+pal_list <- pal$color_hex
+names(pal_list) <- pal$main_lc
+
+
+# Plot by region
+ggplot(pop_3338_cover, aes(region, population, fill = main_lc)) +
+    geom_col() +
+    scale_y_continuous(labels = comma) +
+    scale_fill_manual(values = pal_list) +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    ggtitle("Land cover type by region and population") +
+    labs(fill = "", y = "Population", x = "")
+```
+
+```{r}
+ggplot() +
+    geom_sf(data = ak_regions_3338, aes(), color = "black") +
+    geom_sf(data = pop_3338_cover, aes(color = main_lc,
+                                       size = population), show.legend = "point") +
+    scale_size_continuous(guide = F) +
+    scale_color_manual(values = pal_list) +
+    theme_bw() +
+    theme(legend.position = "bottom", legend.title = element_blank())
+```
+
+#Cropping the Copper River region
+```{r}
+copper_region_3338 <- ak_regions_3338 %>% 
+  filter(region == "Copper River")
+
+plot(copper_region_3338)
+```
+
+```{r}
+copper_lc_3338 <- crop(lc_3338, copper_region_3338)
+
+plot(copper_lc_3338)
+```
+
+Defining forest mask function
+```{r}
+# Function to create a binary mask for forest 
+forest_masker <- function(x){
+  x[x<40 | x>49] <- 0
+  x[x>=40 & x<=49] <- 1
+  x
+}
+```
+
+```{r}
+copper_forested_3338 <- calc(copper_lc_3338, forest_masker)
+
+```
+
+```{r}
+plot(copper_forested_3338)
+```
+
+Selecting the copper river population
+```{r}
+copper_pop_3338 <- pop_3338_cover %>% 
+  filter(region == "Copper River")
+```
+
+```{r}
+forested_count <- extract(copper_forested_3338, copper_pop_3338, buffer = 500, fun=sum)
+
+head(forested_count)
+```
+
+```{r}
+copper_pop_3338$forest_cov <- 100 * forested_count / (20 * 20)
+
+head(copper_pop_3338)
+```
+
